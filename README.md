@@ -23,7 +23,7 @@ The `mcp-tools.ts` file includes TypeScript definitions for various aspects of a
 *   Relationships between palaces (San Fang Si Zheng, An He, etc.)
 *   Temporal data for Decades (大限) and Annual (流年) periods
 *   Overlapping palace information across different time layers
-*   Definitions for querying astrological patterns (格局) and star combination meanings.
+*   Definitions for querying astrological patterns (格局) and star combination meanings, and for storing custom combination definitions.
 
 Each definition is accompanied by JSDoc comments explaining its purpose and the meaning of its properties, especially for terms specific to Zi Wei Dou Shu.
 
@@ -54,7 +54,7 @@ This setup facilitates a clear separation of concerns: `iztro` handles the compl
 
 ## Stdio MCP Server (`mcp-server-stdio.ts`)
 
-A reference implementation of an MCP server that communicates over standard input/output (stdio) is provided in `mcp-server-stdio.ts`. **This server now integrates with the `iztro` TypeScript library (from the `src` directory) to provide actual astrological data for the F-series, R-series, and T-series tools, not just mocked responses.**
+A reference implementation of an MCP server that communicates over standard input/output (stdio) is provided in `mcp-server-stdio.ts`. **This server now integrates with the `iztro` TypeScript library (from the `src` directory) to provide actual astrological data for the F-series, R-series, and T-series tools.**
 
 ### Building and Running
 
@@ -95,11 +95,11 @@ Each response will be a JSON object with the following properties:
     *   `message` (string): Description of the error.
     *   `code` (string, optional): An error code (e.g., "INVALID_JSON", "TOOL_NOT_FOUND", "INVALID_PARAMS", "CHART_NOT_INITIALIZED", "NOT_IMPLEMENTED").
 
-#### Chart Initialization (`MCP-SYS-01`)
+#### Chart Initialization (`MCP-SYS-01 Initialize_Chart`)
 
 Before most other data-retrieval tools (F, R, T-series) can be used, the astrological chart must be initialized using the `MCP-SYS-01` tool.
 
-**Purpose:** Initializes the astrological chart context within the server using the provided birth parameters.
+**Purpose:** Initializes the astrological chart context within the server using the provided birth parameters. After successful initialization, it also automatically runs all stored star combination definitions (see MCP-A03) against the new chart and returns any matches.
 
 **Request `params` for `MCP-SYS-01`:**
 *   `birthDate` (string): The birth date in "YYYY-MM-DD" format.
@@ -113,15 +113,79 @@ Before most other data-retrieval tools (F, R, T-series) can be used, the astrolo
 {"requestId": "req-init", "toolId": "MCP-SYS-01", "params": {"birthDate": "1990-03-15", "birthTimeIndex": 5, "gender": "男", "isLunar": false}}
 ```
 
-*Example Success Response for `MCP-SYS-01`*:
+*Example Success Response for `MCP-SYS-01` (with a matched combination)*:
 ```json
-{"requestId": "req-init", "status": "success", "data": {"success": true}}
+{
+  "requestId": "req-init-002",
+  "status": "success",
+  "data": {
+    "success": true,
+    "matchedCombinations": [
+      {
+        "name": "My Custom Pattern",
+        "meaning": "Zi Wei in Ming Gong with Miao brightness indicates...",
+        "id": "unique-combo-id-12345"
+      }
+      // ... other matched combinations if any
+    ]
+  }
+}
 ```
-If initialization fails (e.g., invalid date), an error response will be returned.
+If no combinations match, the `matchedCombinations` field will be `undefined` or an empty array. If initialization fails (e.g., invalid date), an error response will be returned.
+
+#### Storing Star Combination Definitions (`MCP-A03 Store_Star_Combination_Meaning`)
+
+This tool allows an LLM to define and store custom star combinations (or patterns/格局) for later evaluation.
+
+**Purpose:** Stores a new star combination definition, including its name, JavaScript validation logic, a textual meaning, and optional references to example charts.
+
+**Request `params` for `MCP-A03`:**
+*   `combinationName` (string): A descriptive name for the combination (e.g., "禄马交驰格").
+*   `jsCode` (string): A string of JavaScript code. This code should be the body of a function that returns `true` if the combination is present in the chart, and `false` otherwise.
+*   `meaning` (string): A textual interpretation or meaning of this combination.
+*   `relatedCharts` (string[], optional): An array of strings, typically IDs or descriptions of charts where this combination is known to be present, for reference or examples.
+
+*Example Request for `MCP-A03 Store_Star_Combination_Meaning`*:
+```json
+{
+  "requestId": "req-store-combo-001",
+  "toolId": "MCP-A03",
+  "params": {
+    "combinationName": "My Custom Pattern",
+    "jsCode": "return currentAstrolabe.palace('MingGong').hasStar('ZiWei') && currentAstrolabe.palace('MingGong').star('ZiWei').brightness === 'Miao';",
+    "meaning": "Zi Wei in Ming Gong with Miao brightness indicates...",
+    "relatedCharts": ["Example Case ID 123"]
+  }
+}
+```
+
+**`jsCode` Execution Environment:**
+The provided `jsCode` is executed in a secure sandbox environment (`vm2`).
+*   It should be written as the body of a function that returns a boolean value (`true` for match, `false` otherwise).
+*   An `astrolabe` object (representing the current `FunctionalAstrolabe` instance from `iztro`) is available within the `jsCode`'s scope. This object provides access to the full chart data and `iztro`'s analytical methods.
+*   A limited `console` object (`console.log`, `console.error`) is also available for logging from the sandboxed code; these logs will appear on the server's `stderr`.
+*   Access to Node.js built-ins like `require`, `process`, `module`, and file system access is forbidden.
+
+*Example Success Response for `MCP-A03`*:
+```json
+{
+  "requestId": "req-store-combo-001",
+  "status": "success",
+  "data": {
+    "success": true,
+    "id": "unique-combo-id-12345",
+    "messages": [
+      "Star combination meaning stored successfully.",
+      "You can now reference this combination by its ID when initializing charts.",
+      "The jsCode will be executed against future charts to check for matches."
+    ]
+  }
+}
+```
 
 #### Data Retrieval Tools
 
-Once the chart is successfully initialized, other tools (F-series, R-series, T-series) can be called to get detailed chart information based on this initialized context.
+Once the chart is successfully initialized using `MCP-SYS-01`, other tools (F-series, R-series, T-series) can be called to get detailed chart information based on this initialized context.
 
 *Example Request (for Get_Palace_Info after initialization):*
 ```json
@@ -135,13 +199,14 @@ Once the chart is successfully initialized, other tools (F-series, R-series, T-s
 
 ### Available Tools
 
-*   **`MCP-SYS-01 Initialize_Chart`**: Initializes the chart context (see above).
-*   **F-Series (Fundamental Chart Data)**: Tools like `Get_Chart_Basics`, `Get_Palace_Info`, `Get_Stars_In_Palace`, `Get_Star_Attributes`, `Get_Natal_SiHua`. These now return actual data derived from the initialized `iztro` chart.
+*   **`MCP-SYS-01 Initialize_Chart`**: Initializes the chart context and checks for stored combination matches.
+*   **F-Series (Fundamental Chart Data)**: Tools like `Get_Chart_Basics`, `Get_Palace_Info`, `Get_Stars_In_Palace`, `Get_Star_Attributes`, `Get_Natal_SiHua`. These return actual data derived from the initialized `iztro` chart.
 *   **R-Series (Relationship Analysis)**: Tools like `Get_SanFang_SiZheng`, `Get_AnHe_Palace`, `Get_ChongZhao_Palace`, `Get_Jia_Gong_Info`. These also use the initialized `iztro` chart.
 *   **T-Series (Temporal Analysis)**: Tools like `Get_Decade_Info`, `Get_Annual_Info`, `Get_Decade_SiHua`, `Get_Annual_SiHua`, etc. These utilize `iztro`'s horoscope functionalities for time-based calculations.
 *   **A-Series (Advanced Support)**:
     *   `Query_Astrological_Pattern` (MCP-A01): This tool has been **removed**. Requests for it will result in a `TOOL_NOT_FOUND` error.
     *   `Query_Star_Combination_Meaning` (MCP-A02): This tool is **not currently implemented** (TODO). Requests for it will result in a `NOT_IMPLEMENTED` error.
+    *   `MCP-A03 Store_Star_Combination_Meaning`: Allows defining and storing custom star combination logic (see above).
 
 Refer to `mcp-tools.ts` for details on each tool's expected `params` (if any, beyond initialization) and `data` structure, and to the `switch` statement in `mcp-server-stdio.ts` for the exact string `toolId`s.
 
@@ -151,4 +216,4 @@ Basic unit tests for the stdio server are available in `mcp-server-stdio.test.ts
 ```bash
 node mcp-server-stdio.test.js
 ```
-The tests use a `child_process` approach to interact with the server and verify its behavior against various scenarios, including chart initialization and subsequent data retrieval. Ensure `mcp-server-stdio.js` is present in the same directory (or adjust paths in the test file if using `ts-node` or a different build output structure).
+The tests use a `child_process` approach to interact with the server and verify its behavior against various scenarios, including chart initialization, data retrieval, and storing/evaluating custom star combinations. Ensure `mcp-server-stdio.js` is present in the same directory (or adjust paths in the test file if using `ts-node` or a different build output structure).

@@ -158,6 +158,30 @@ export enum SiHuaType {
   Ji = "忌", // Obstruction/Negativity
 }
 
+// --- System Level Tool Definitions (MCP-SYS) ---
+
+/**
+ * @interface InitializeChartOutputData
+ * @description Output data for the MCP-SYS-01 Initialize_Chart tool.
+ */
+export interface InitializeChartOutputData {
+  /** @property {boolean} success - Indicates if the chart initialization was successful. */
+  success: boolean;
+  /**
+   * @property {Array<StoredStarCombinationMatch>} [matchedCombinations] - Information about stored star combinations that matched the initialized chart.
+   * Will be populated if any stored combinations are found to be true for this chart.
+   */
+  matchedCombinations?: StoredStarCombinationMatch[];
+}
+
+/**
+ * @alias InitializeChartFunctionOutput
+ * @description Defines the expected output data type for the Initialize_Chart tool.
+ * Output: {@link InitializeChartOutputData}
+ */
+export type InitializeChartFunctionOutput = InitializeChartOutputData;
+
+
 // Interface Definitions for Tool Outputs (MCP-F01 to MCP-F05)
 
 /**
@@ -830,3 +854,73 @@ export type QueryStarCombinationMeaningFunctionOutput = StarCombinationMeaning;
 
 
 console.log("TypeScript definitions for iztro backend tools, including Advanced Support Layer, updated.");
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]
+
+[end of mcp-tools.ts]

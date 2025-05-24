@@ -2,10 +2,13 @@
  * @file mcp-server-stdio.ts
  * @description Implements a stdio server loop for handling MCP tool requests,
  *              integrating actual iztro logic for F, R, and T-series tools.
- *              A-series tools are handled as per specific requirements (A01 removed, A02 TODO).
+ *              A-series tools are handled as per specific requirements (A01 removed, A02 TODO, A03 implemented).
+ *              Includes in-memory storage for star combinations and sandboxed JS execution.
  */
 
 import * as readline from 'readline';
+import { randomUUID } from 'crypto'; // For unique ID generation
+import { VM, VMScript } from 'vm2'; // For sandboxed JS execution
 import {
   // Enums from mcp-tools.ts
   PalaceName, DiZhi, TianGan, StarType, BrightnessLevel, WuXing, YinYang, BasicLuck, SiHuaType, Gender, WuXingJu, ChartLevel,
@@ -13,20 +16,28 @@ import {
   BirthInfo, PalaceInfo, StarInPalace, StarAttributes, NatalSiHuaStar,
   SanFangSiZhengInfo, AnHePalaceInfo, ChongZhaoPalaceInfo, JiaGongInfo,
   DecadeInfo, TemporalSiHuaStar, OverlappingPalaceInfo, AnnualInfo, AnnualOverlappingPalacesInfo, FeiSiHuaStarInfo,
-  StarCombinationMeaning, AstrologicalPatternInfo, // MCP-A types (AstrologicalPatternInfo is no longer produced by a handler)
+  StarCombinationMeaning, // MCP-A02 Output
+  InitializeChartOutputData, // MCP-SYS-01 Output
+  StoreStarCombinationMeaningOutputData, // MCP-A03 Output
+  StoredStarCombinationMatch, // Used in InitializeChartOutputData
   // MCP Tool Input Helper Types
   PalaceDescriptor, PalaceIdentifierInput, FlankingStarInfo, TimeBoundPalaceMapping, FullNatalChartContext, StarCombinationInput,
+  // MCP-A03 Types
+  StoredStarCombination, StoreStarCombinationMeaningInputParams,
 } from './mcp-tools';
 
 // Iztro imports
 import { withOptions, FunctionalAstrolabe, FunctionalPalace, FunctionalStar, SurroundedPalaces } from '../src/astro';
-import { Option, HeavenlyStemKey as IzHeavenlyStemKey, EarthlyBranchKey as IzEarthlyBranchKey, StarKey as IzStarKey, PalaceKey as IzPalaceKey, BrightnessKey as IzBrightnessKey, FiveElementsClassKey as IzFiveElementsClassKey, StarCategoryKey as IzStarCategoryKey, MutagenKey as IzMutagenKey, FiveElementsKey as IzFiveElementsKey, YinYangKey as IzYinYangKey, HoroscopePalace as IzHoroscopePalace, FunctionalHoroscope } from '../src/data/types';
+import { Option, HeavenlyStemKey as IzHeavenlyStemKey, EarthlyBranchKey as IzEarthlyBranchKey, StarKey as IzStarKey, PalaceKey as IzPalaceKey, BrightnessKey as IzBrightnessKey, FiveElementsClassKey as IzFiveElementsClassKey, StarCategoryKey as IzStarCategoryKey, MutagenKey as IzMutagenKey, FiveElementsKey as IzFiveElementsKey, YinYangKey as IzYinYangKey, HoroscopePalace as IzHoroscopePalace } from '../src/data/types';
 import { STARS_INFO } from '../src/data/stars';
-import { starKeyToName, palaceKeyToName, earthlyBranchKeyToName, heavenlyStemKeyToName } from '../src/i18n';
+import { starKeyToName, palaceKeyToName } from '../src/i18n';
 
 // --- Global State for Chart Context ---
 let currentAstrolabe: FunctionalAstrolabe | null = null;
 let chartOptions: Option | null = null;
+
+// --- In-memory storage for Star Combinations ---
+let storedCombinations: StoredStarCombination[] = [];
 
 // --- McpRequest & Response Interfaces ---
 interface McpRequest { requestId: string; toolId: string; params: any; }
@@ -36,6 +47,67 @@ interface McpSuccessResponse { requestId: string; status: "success"; data: any; 
 function writeResponse(response: McpErrorResponse | McpSuccessResponse): void {
   process.stdout.write(JSON.stringify(response) + '\n');
 }
+
+// --- Star Combination Storage Helper Functions ---
+function addStoredCombination(comboData: StoreStarCombinationMeaningInputParams): { success: boolean, id: string } {
+  const generatedId = randomUUID();
+  const newCombination: StoredStarCombination = { id: generatedId, combinationName: comboData.combinationName, jsCode: comboData.jsCode, meaning: comboData.meaning, relatedCharts: comboData.relatedCharts || [] };
+  storedCombinations.push(newCombination);
+  console.error(`[${new Date().toISOString()}] Added star combination: ${newCombination.combinationName} (ID: ${generatedId})`);
+  return { success: true, id: generatedId };
+}
+function getStoredCombinationById(id: string): StoredStarCombination | undefined { return storedCombinations.find(combo => combo.id === id); }
+function getAllStoredCombinations(): StoredStarCombination[] { return [...storedCombinations]; }
+
+
+// --- Sandboxed JavaScript Execution ---
+/**
+ * Executes JavaScript code in a sandboxed environment with access to the astrolabe instance.
+ * @param {string} jsCode - The JavaScript code string (should be the body of a function).
+ * @param {FunctionalAstrolabe} astrolabe - The FunctionalAstrolabe instance for the current chart.
+ * @returns {boolean} True if the code executes and returns true, false otherwise (including errors).
+ */
+function executeCombinationJsCode(jsCode: string, astrolabe: FunctionalAstrolabe): boolean {
+  const sandbox = {
+    currentAstrolabe: astrolabe, 
+    console: { 
+        log: (...args: any[]) => console.error('[Sandbox Log]', ...args),
+        error: (...args: any[]) => console.error('[Sandbox Error]', ...args),
+    }
+  };
+
+  const vm = new VM({
+    timeout: 100, 
+    sandbox: sandbox,
+    eval: false,    
+    wasm: false,    
+    fixAsync: true, 
+    sandbox:{ 
+        ...sandbox, 
+        require: undefined, 
+        process: undefined, 
+        module: undefined,
+        exports: undefined,
+    }
+  });
+
+  try {
+    const scriptToRun = `
+      (function(astrolabe) {
+        "use strict";
+        ${jsCode}
+      })(currentAstrolabe); 
+    `;
+    
+    const script = new VMScript(scriptToRun, { filename: 'llm_combination_code.js' });
+    const result = vm.run(script);
+    return typeof result === 'boolean' ? result : false;
+  } catch (e: any) {
+    console.error(`[Sandbox Execution Error] for code "${jsCode.substring(0, 100)}...":`, e.message, e.stack ? `\nStack: ${e.stack}` : '');
+    return false;
+  }
+}
+
 
 // --- Mapping Utilities ---
 const izPalaceKeyToMcpPalaceName: Record<IzPalaceKey, PalaceName> = { ming: PalaceName.Ming, xiongdi: PalaceName.XiongDi, fuqi: PalaceName.FuQi, zinv: PalaceName.ZiNv, caibo: PalaceName.CaiBo, jie: PalaceName.JiE, qianyi: PalaceName.QianYi, nupu: PalaceName.NuPu, guanlu: PalaceName.GuanLu, tianzhai: PalaceName.TianZhai, fude: PalaceName.FuDe, fumu: PalaceName.FuMu, shen: PalaceName.Ming };
@@ -59,7 +131,47 @@ function isValidPalaceIdentifier(identifier: any): identifier is PalaceIdentifie
 function getIzPalaceKeyFromMcpIdentifier(mcpIdentifier: PalaceIdentifierInput): IzPalaceKey { if (Object.values(PalaceName).includes(mcpIdentifier as PalaceName)) { return mcpPalaceNameToIzPalaceKey[mcpIdentifier as PalaceName]; } else if (Object.values(DiZhi).includes(mcpIdentifier as DiZhi)) { const targetDiZhiKey = mcpDiZhiToIzEarthlyBranchKey[mcpIdentifier as DiZhi]; const foundPalace = currentAstrolabe?.palaces.find(p => p.earthlyBranchKey === targetDiZhiKey); if (foundPalace) { return foundPalace.key; } throw new Error(`Invalid parameters: No palace found for DiZhi ${mcpIdentifier}`); } throw new Error(`Invalid PalaceIdentifier for IzPalaceKey mapping: ${mcpIdentifier}`); }
 
 // --- SYSTEM TOOL HANDLER ---
-function handleInitializeChart(params: any): { success: boolean } { if (!params || typeof params.birthDate !== 'string' || typeof params.birthTimeIndex !== 'number' || typeof params.gender !== 'string') { throw new Error("Invalid parameters: birthDate (string), birthTimeIndex (number), gender (string) are required."); } if (!["男", "女"].includes(params.gender)) { throw new Error("Invalid parameters: gender must be '男' or '女'."); } if (params.birthTimeIndex < 0 || params.birthTimeIndex > 12) { throw new Error("Invalid parameters: birthTimeIndex must be between 0 and 12.");} const isLunar = typeof params.isLunar === 'boolean' ? params.isLunar : false; const iztroOption: Option = { dateStr: params.birthDate, timeIndex: params.birthTimeIndex, gender: params.gender as "男" | "女", isSolar: !isLunar, fixLeap: typeof params.fixLeap === 'boolean' ? params.fixLeap : true }; try { currentAstrolabe = withOptions(iztroOption); chartOptions = iztroOption; console.error(`[${new Date().toISOString()}] Chart initialized successfully for: ${params.birthDate}`); return { success: true }; } catch (error: any) { console.error(`[${new Date().toISOString()}] Error initializing chart with iztro:`, error); throw new Error(`Failed to initialize chart with iztro: ${error.message}`); } }
+function handleInitializeChart(params: any): InitializeChartOutputData { 
+  if (!params || typeof params.birthDate !== 'string' || typeof params.birthTimeIndex !== 'number' || typeof params.gender !== 'string') { throw new Error("Invalid parameters: birthDate (string), birthTimeIndex (number), gender (string) are required."); } 
+  if (!["男", "女"].includes(params.gender)) { throw new Error("Invalid parameters: gender must be '男' or '女'."); } 
+  if (params.birthTimeIndex < 0 || params.birthTimeIndex > 12) { throw new Error("Invalid parameters: birthTimeIndex must be between 0 and 12.");} 
+  const isLunar = typeof params.isLunar === 'boolean' ? params.isLunar : false; 
+  const iztroOption: Option = { dateStr: params.birthDate, timeIndex: params.birthTimeIndex, gender: params.gender as "男" | "女", isSolar: !isLunar, fixLeap: typeof params.fixLeap === 'boolean' ? params.fixLeap : true }; 
+  
+  try { 
+    currentAstrolabe = withOptions(iztroOption); 
+    chartOptions = iztroOption; 
+    console.error(`[${new Date().toISOString()}] Chart initialized successfully for: ${params.birthDate}`);
+    
+    let matchedCombinationsOutput: StoredStarCombinationMatch[] = [];
+    if (currentAstrolabe) {
+        const allCombinations = getAllStoredCombinations();
+        console.error(`[Auto-Execution] Found ${allCombinations.length} stored combinations to check.`);
+
+        for (const combo of allCombinations) {
+            console.error(`[Auto-Execution] Checking combination: ${combo.combinationName} (ID: ${combo.id})`);
+            const isMatch = executeCombinationJsCode(combo.jsCode, currentAstrolabe);
+            if (isMatch) {
+                console.error(`[Auto-Execution] MATCH! Combination: ${combo.combinationName}`);
+                matchedCombinationsOutput.push({
+                    name: combo.combinationName,
+                    meaning: combo.meaning,
+                    id: combo.id,
+                });
+            }
+        }
+    }
+    return { 
+        success: true,
+        matchedCombinations: matchedCombinationsOutput.length > 0 ? matchedCombinationsOutput : undefined
+    }; 
+  } catch (error: any) { 
+    console.error(`[${new Date().toISOString()}] Error initializing chart with iztro:`, error); 
+    currentAstrolabe = null; // Reset on failure
+    chartOptions = null;
+    throw new Error(`Failed to initialize chart with iztro: ${error.message}`); 
+  } 
+}
 
 // --- Tool Handlers ---
 function ensureChartInitialized(): void { if (!currentAstrolabe || !chartOptions) { throw new Error("CHART_NOT_INITIALIZED: Chart not initialized. Call MCP-SYS-01 Initialize_Chart first."); } }
@@ -79,7 +191,7 @@ const jiaGongStarPatterns: Array<{ type: string; star1Key: IzStarKey; star2Key: 
 function palaceHasStar(palace: FunctionalPalace, izStarKey: IzStarKey): boolean { return palace.stars.some(s => s.key === izStarKey); }
 function handleGetJiaGongInfo(params: { referencePalaceIdentifier?: PalaceIdentifierInput }): JiaGongInfo | null { ensureChartInitialized(); if (!params || !isValidPalaceIdentifier(params.referencePalaceIdentifier)) { throw new Error("Invalid parameters: referencePalaceIdentifier is required and must be a valid PalaceName or DiZhi."); } const izPalaceKey = getIzPalaceKeyFromMcpIdentifier(params.referencePalaceIdentifier); const targetPalace = currentAstrolabe!.palace(izPalaceKey); const prevPalaceIndex = (targetPalace.index - 1 + 12) % 12; const nextPalaceIndex = (targetPalace.index + 1) % 12; const prevPalace = currentAstrolabe!.palaces[prevPalaceIndex]; const nextPalace = currentAstrolabe!.palaces[nextPalaceIndex]; for (const pattern of jiaGongStarPatterns) { const star1InPrev = palaceHasStar(prevPalace, pattern.star1Key); const star2InNext = palaceHasStar(nextPalace, pattern.star2Key); const star2InPrev = palaceHasStar(prevPalace, pattern.star2Key); const star1InNext = palaceHasStar(nextPalace, pattern.star1Key); if ((star1InPrev && star2InNext) || (star2InPrev && star1InNext)) { return { referencePalace: mapFunctionalPalaceToMcpPalaceDescriptor(targetPalace), jiaGongType: pattern.type, flankingStars: [ { starName: starKeyToName(pattern.star1Key, chartOptions?.language || 'zh-CN'), starPalace: mapFunctionalPalaceToMcpPalaceDescriptor(star1InPrev ? prevPalace : nextPalace) }, { starName: starKeyToName(pattern.star2Key, chartOptions?.language || 'zh-CN'), starPalace: mapFunctionalPalaceToMcpPalaceDescriptor(star2InNext ? nextPalace : prevPalace) } ] }; } } return null; }
 
-// MCP-T Series (Implemented with iztro)
+// MCP-T Series
 function handleGetDecadeInfo(params: { userAge?: number; decadeIndex?: number }): DecadeInfo { ensureChartInitialized(); if (!params || (typeof params.userAge !== 'number' && typeof params.decadeIndex !== 'number')) { throw new Error("Invalid parameters: Either userAge (number) or decadeIndex (number) must be provided."); } const iztroHoroscope = currentAstrolabe!.horoscope(undefined, undefined, params.userAge, params.decadeIndex); const decadalHoroscopeItem = iztroHoroscope.decadal; const izDecadeMingPalace = decadalHoroscopeItem.palaces[0]; const decadePalaces: TimeBoundPalaceMapping[] = decadalHoroscopeItem.palaces.map((izTimedPalace: IzHoroscopePalace) => ({ timePalaceName: `大限${palaceKeyToName(izTimedPalace.key, chartOptions?.language || 'zh-CN')}`, natalPalaceName: izPalaceKeyToMcpPalaceName[izTimedPalace.key], timePalaceTianGan: izHeavenlyStemKeyToMcpTianGan[izTimedPalace.heavenlyStemKey], timePalaceDiZhi: izEarthlyBranchKeyToMcpDiZhi[izTimedPalace.earthlyBranchKey] })); return { decadeStartAge: decadalHoroscopeItem.range[0], decadeEndAge: decadalHoroscopeItem.range[1], decadeMingGong: mapFunctionalPalaceToMcpPalaceDescriptor(izDecadeMingPalace as unknown as FunctionalPalace), decadeMingGongTianGan: izHeavenlyStemKeyToMcpTianGan[izDecadeMingPalace.heavenlyStemKey], decadePalaces: decadePalaces }; }
 function handleGetDecadeSiHua(params: { decadeMingGongTianGan?: TianGan }): TemporalSiHuaStar[] { ensureChartInitialized(); if (!params || !params.decadeMingGongTianGan || !Object.values(TianGan).includes(params.decadeMingGongTianGan)) { throw new Error("Invalid parameters: decadeMingGongTianGan is required and must be a valid TianGan."); } const izTianGanKey = mcpTianGanToIzHeavenlyStemKey[params.decadeMingGongTianGan]; const izSiHuaStars = currentAstrolabe!.getFourTransformationStars(izTianGanKey); return izSiHuaStars.map(izStar => { const natalStarInstance = currentAstrolabe!.star(izStar.key); if (!natalStarInstance || !natalStarInstance.palaceName) { throw new Error(`Could not find natal palace for star ${izStar.key}`); } const natalPalaceOfStar = currentAstrolabe!.palace(natalStarInstance.palaceName); return { siHuaType: izMutagenToMcpSiHuaType[izStar.mutagen!], originalStarName: izStar.name, palaceLocated: mapFunctionalPalaceToMcpPalaceDescriptor(natalPalaceOfStar) }; }); }
 function handleGetDecadeOverlappingPalaces(params: { decadeInfo?: DecadeInfo }): OverlappingPalaceInfo[] { ensureChartInitialized(); if (!params || !params.decadeInfo || !Array.isArray(params.decadeInfo.decadePalaces) || params.decadeInfo.decadePalaces.length === 0) { throw new Error("Invalid parameters: decadeInfo with a non-empty decadePalaces array is required."); } return params.decadeInfo.decadePalaces; }
@@ -88,10 +200,39 @@ function handleGetAnnualSiHua(params: { annualTianGan?: TianGan }): TemporalSiHu
 function handleGetAnnualOverlappingPalaces(params: { annualInfo?: AnnualInfo; decadeInfo?: DecadeInfo }): AnnualOverlappingPalacesInfo { ensureChartInitialized(); if (!params || !params.annualInfo || !params.decadeInfo || !Array.isArray(params.annualInfo.annualPalaces) || !Array.isArray(params.decadeInfo.decadePalaces) ) { throw new Error("Invalid parameters: annualInfo and decadeInfo (with their palace arrays) are required."); } const annualToNatal: AnnualToNatalOverlap[] = params.annualInfo.annualPalaces.map(ap => ({ annualPalaceName: ap.timePalaceName, natalPalaceName: ap.natalPalaceName, annualPalaceTianGan: ap.timePalaceTianGan, annualPalaceDiZhi: ap.timePalaceDiZhi })); const annualToDecade: AnnualToDecadeOverlap[] = []; params.annualInfo.annualPalaces.forEach(annualMapping => { const decadeMapping = params.decadeInfo!.decadePalaces.find(dm => dm.natalPalaceName === annualMapping.natalPalaceName); if (decadeMapping) { annualToDecade.push({ annualPalaceName: annualMapping.timePalaceName, decadePalaceName: decadeMapping.timePalaceName, annualPalaceTianGan: annualMapping.timePalaceTianGan, annualPalaceDiZhi: annualMapping.timePalaceDiZhi }); } }); return { annualToNatal, annualToDecade }; }
 function handleGetPalaceStemSiHua(params: { chartLevel?: ChartLevel; referencePalace?: PalaceIdentifierInput, yearForAnnualChart?: number }): FeiSiHuaStarInfo[] { ensureChartInitialized(); if (!params || !params.chartLevel || !Object.values(ChartLevel).includes(params.chartLevel)) { throw new Error("Invalid parameters: chartLevel is required and must be a valid ChartLevel."); } if (!isValidPalaceIdentifier(params.referencePalace)) { throw new Error("Invalid parameters: referencePalace is required and must be a valid PalaceName or DiZhi."); } let sourceTianGanKey: IzHeavenlyStemKey; const refIzPalaceKey = getIzPalaceKeyFromMcpIdentifier(params.referencePalace); if (params.chartLevel === ChartLevel.Natal) { sourceTianGanKey = currentAstrolabe!.palace(refIzPalaceKey).heavenlyStemKey; } else { const yearForHoroscope = params.chartLevel === ChartLevel.Annual ? (params.yearForAnnualChart || new Date().getFullYear()) : undefined; const iFuncHoroscope = currentAstrolabe!.horoscope(undefined, yearForHoroscope); const timedChartPalaces = params.chartLevel === ChartLevel.Decade ? iFuncHoroscope.decadal.palaces : iFuncHoroscope.yearly.palaces; const timedSourcePalace = timedChartPalaces.find(p => p.key === refIzPalaceKey); if (!timedSourcePalace) { throw new Error(`Palace ${params.referencePalace} not found in ${params.chartLevel} chart context.`); } sourceTianGanKey = timedSourcePalace.heavenlyStemKey; } const flyingSiHuaStarsRaw = currentAstrolabe!.getFourTransformationStars(sourceTianGanKey); return flyingSiHuaStarsRaw.map(rawSiHuaStar => { const natalStarInstance = currentAstrolabe!.star(rawSiHuaStar.key); if (!natalStarInstance || !natalStarInstance.palaceName) { throw new Error(`Could not find natal palace for SiHua target star ${rawSiHuaStar.key}`); } const targetNatalPalace = currentAstrolabe!.palace(natalStarInstance.palaceName); return { siHuaType: izMutagenToMcpSiHuaType[rawSiHuaStar.mutagen!], originalStarInSourcePalace: rawSiHuaStar.name, targetPalace: mapFunctionalPalaceToMcpPalaceDescriptor(targetNatalPalace), affectedStarInTargetPalace: undefined }; }); }
 
-// MCP-A Series (Adjusted as per current task)
-// MCP-A01 Query_Astrological_Pattern is removed from router, will result in TOOL_NOT_FOUND
+// MCP-A Series
+async function handleStoreStarCombinationMeaning(params: StoreStarCombinationMeaningInputParams): Promise<StoreStarCombinationMeaningOutputData> {
+  if (!params.combinationName || typeof params.combinationName !== 'string' || params.combinationName.trim() === "") {
+    throw new Error("Invalid parameters: combinationName must be a non-empty string.");
+  }
+  if (!params.jsCode || typeof params.jsCode !== 'string' || params.jsCode.trim() === "") {
+    throw new Error("Invalid parameters: jsCode must be a non-empty string.");
+  }
+  if (!params.meaning || typeof params.meaning !== 'string' || params.meaning.trim() === "") {
+    throw new Error("Invalid parameters: meaning must be a non-empty string.");
+  }
+  if (params.relatedCharts && 
+      (!Array.isArray(params.relatedCharts) || !params.relatedCharts.every(item => typeof item === 'string'))
+     ) {
+    throw new Error("Invalid parameters: relatedCharts must be an array of strings if provided.");
+  }
+
+  const storeResult = addStoredCombination(params);
+
+  const responseMessages: string[] = [
+    "Star combination meaning stored successfully.",
+    "You can now reference this combination by its ID when initializing charts.",
+    "The jsCode will be executed against future charts to check for matches."
+  ];
+
+  return {
+    success: storeResult.success,
+    id: storeResult.id,
+    messages: responseMessages,
+  };
+}
+
 function handleQueryStarCombinationMeaning(params: StarCombinationInput): StarCombinationMeaning {
-  // MCP-A02: Query_Star_Combination_Meaning - Now throws NOT_IMPLEMENTED
   throw new Error("Feature not implemented: Query_Star_Combination_Meaning is a TODO.");
 }
 
@@ -99,7 +240,7 @@ function handleQueryStarCombinationMeaning(params: StarCombinationInput): StarCo
 function main(): void {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
   console.error(`[${new Date().toISOString()}] MCP STDIO Server started. Listening for requests on stdin...`);
-  rl.on('line', (line) => {
+  rl.on('line', async (line) => { // Added async here
     let parsedRequest: McpRequest | null = null;
     let requestId: string | null = null;
     try {
@@ -128,8 +269,8 @@ function main(): void {
         case "Get_Annual_SiHua": responseData = handleGetAnnualSiHua(params); break;
         case "Get_Annual_Overlapping_Palaces": responseData = handleGetAnnualOverlappingPalaces(params); break;
         case "Get_Palace_Stem_SiHua": responseData = handleGetPalaceStemSiHua(params); break;
-        // MCP-A01 Query_Astrological_Pattern case is removed.
         case "Query_Star_Combination_Meaning": responseData = handleQueryStarCombinationMeaning(params as StarCombinationInput); break;
+        case "MCP-A03": responseData = await handleStoreStarCombinationMeaning(params as StoreStarCombinationMeaningInputParams); break;
         default: toolFound = false; const eRes: McpErrorResponse = { requestId: requestId, status: "error", error: { message: `Tool ID '${parsedRequest.toolId}' not found or not yet implemented.`, code: "TOOL_NOT_FOUND" } }; writeResponse(eRes); break;
       }
       if (toolFound) { const sRes: McpSuccessResponse = { requestId: requestId, status: "success", data: responseData }; writeResponse(sRes); }
@@ -139,7 +280,7 @@ function main(): void {
       let errorCode = "PROCESSING_ERROR";
       if (error.message?.startsWith("Invalid parameters:")) { errorCode = "INVALID_PARAMS"; }
       else if (error.message?.startsWith("CHART_NOT_INITIALIZED:")) { errorCode = "CHART_NOT_INITIALIZED"; }
-      else if (error.message?.startsWith("Feature not implemented:")) { errorCode = "NOT_IMPLEMENTED"; } // Added this check
+      else if (error.message?.startsWith("Feature not implemented:")) { errorCode = "NOT_IMPLEMENTED"; } 
       const errorResponse: McpErrorResponse = { requestId: requestId || 'unknown', status: "error", error: { message: error.message || "Invalid JSON input or processing error.", code: errorCode } };
       writeResponse(errorResponse);
     }
