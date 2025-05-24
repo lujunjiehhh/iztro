@@ -51,3 +51,73 @@ if (mingGongInfo && !Array.isArray(mingGongInfo)) {
 ```
 
 This setup facilitates a clear separation of concerns: `iztro` handles the complex astrological calculations, and the LLM focuses on interpretation, leveraging the structured data provided via these MCP tools.
+
+## Stdio MCP Server (`mcp-server-stdio.ts`)
+
+A reference implementation of an MCP server that communicates over standard input/output (stdio) is provided in `mcp-server-stdio.ts`.
+
+### Building and Running
+
+1.  **Prerequisites:**
+    *   Node.js and npm/yarn installed.
+    *   TypeScript installed (`npm install -g typescript` or similar).
+
+2.  **Compilation:**
+    Navigate to the root directory of this project and compile the TypeScript files:
+    ```bash
+    tsc
+    ```
+    This will generate JavaScript files (e.g., `mcp-server-stdio.js` and `mcp-tools.js`) in the same directory or as per your `tsconfig.json` configuration.
+
+3.  **Execution:**
+    Run the compiled server using Node.js:
+    ```bash
+    node mcp-server-stdio.js
+    ```
+    The server will then wait for JSON requests on stdin.
+
+### Interaction Protocol
+
+The server expects requests and sends responses as single-line JSON objects.
+
+**Request Format:**
+Each request must be a JSON object with the following properties:
+*   `requestId` (string): A unique identifier for the request. This ID will be present in the corresponding response.
+*   `toolId` (string): The ID of the MCP tool to execute (e.g., "Get_Chart_Basics", "Get_Palace_Info"). Note: The prompt examples for `toolId` like "MCP-F01" might differ from the actual string IDs used in the server implementation (e.g., "Get_Chart_Basics"). Refer to the `switch` statement in `mcp-server-stdio.ts` for the exact `toolId` strings.
+*   `params` (object): An object containing the parameters for the specified tool. The structure of `params` must match the input type defined for that tool in `mcp-tools.ts`.
+
+*Example Request (for Get_Palace_Info):*
+```json
+{"requestId": "req-001", "toolId": "Get_Palace_Info", "params": {"palaceName": "Ming"}}
+```
+
+**Response Format:**
+Each response will be a JSON object with the following properties:
+*   `requestId` (string): The identifier from the original request.
+*   `status` (string): Either "success" or "error".
+*   `data` (object, optional): If `status` is "success", this field contains the tool's result, conforming to the output type in `mcp-tools.ts`.
+*   `error` (object, optional): If `status` is "error", this field contains:
+    *   `message` (string): Description of the error.
+    *   `code` (string, optional): An error code (e.g., "INVALID_JSON", "TOOL_NOT_FOUND", "INVALID_PARAMS").
+
+*Example Success Response (for Get_Palace_Info, assuming "Ming" was requested):*
+```json
+{"requestId":"req-001","status":"success","data":{"palaceName":"Ming","palaceDiZhi":"Yin","palaceTianGan":"Jia","coreMeaning":"Mocked core meaning for Ming (JiaYin)"}}
+```
+
+*Example Error Response:*
+```json
+{"requestId": "req-002", "status": "error", "error": {"message": "Tool ID 'MCP-XYZ' not found or not yet implemented.", "code": "TOOL_NOT_FOUND"}}
+```
+
+### Available Tools
+
+The server currently provides mocked responses for all tools defined in `mcp-tools.ts` (MCP-F, MCP-R, MCP-T, and MCP-A series). Refer to `mcp-tools.ts` for details on each tool's expected `params` and `data` structure, and to the `switch` statement in `mcp-server-stdio.ts` for the exact string `toolId`s.
+
+### Running Tests
+
+Basic unit tests for the stdio server are available in `mcp-server-stdio.test.ts`. These tests can be executed after compilation:
+```bash
+node mcp-server-stdio.test.js
+```
+The tests use a `child_process` approach to interact with the server and verify its behavior against various scenarios. Ensure `mcp-server-stdio.js` is present in the same directory (or adjust paths in the test file if using `ts-node` or a different build output structure).
