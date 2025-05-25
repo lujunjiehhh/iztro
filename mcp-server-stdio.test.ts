@@ -5,20 +5,22 @@
 
 import * as child_process from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import { 
-    PalaceName, DiZhi, TianGan, StarType, Gender, WuXingJu, SiHuaType, ChartLevel, 
-    BrightnessLevel, WuXing, YinYang, BasicLuck,
+    // @ts-eslint/no-unused-vars: PalaceName, DiZhi, // @ts-eslint/no-unused-vars: TianGan, // @ts-eslint/no-unused-vars: StarType, Gender, WuXingJu, // @ts-eslint/no-unused-vars: SiHuaType, // @ts-eslint/no-unused-vars: ChartLevel, 
+    DiZhi, Gender, WuXingJu, // Keep DiZhi, Gender, WuXingJu as they are used in Object.values
+    // @ts-eslint/no-unused-vars: BrightnessLevel, // @ts-eslint/no-unused-vars: WuXing, // @ts-eslint/no-unused-vars: YinYang, // @ts-eslint/no-unused-vars: BasicLuck,
     // MCP-A03 and SYS-01 related
     StoreStarCombinationMeaningInputParams, 
-    InitializeChartOutputData,
-    StoredStarCombinationMatch
+    // @ts-eslint/no-unused-vars: InitializeChartOutputData,
+    // @ts-eslint/no-unused-vars: StoredStarCombinationMatch
 } from './mcp-tools';
 
 // --- Configuration ---
 const serverScriptPathJs = path.join(__dirname, 'mcp-server-stdio.js'); 
 const serverScriptPathTs = path.join(__dirname, 'mcp-server-stdio.ts');
-const scriptToExecute = require('fs').existsSync(serverScriptPathJs) ? serverScriptPathJs : serverScriptPathTs;
-const commandToExecute = require('fs').existsSync(serverScriptPathJs) ? 'node' : 'ts-node';
+const scriptToExecute = fs.existsSync(serverScriptPathJs) ? serverScriptPathJs : serverScriptPathTs;
+const commandToExecute = fs.existsSync(serverScriptPathJs) ? 'node' : 'ts-node';
 
 // --- Test Runner Helper ---
 interface ProcessOutput {
@@ -29,7 +31,7 @@ interface ProcessOutput {
 
 function runServerProcess(inputLines: string[], expectedOutputLines: number = inputLines.length): Promise<ProcessOutput> {
   return new Promise((resolve, reject) => {
-    if (!require('fs').existsSync(scriptToExecute)) {
+    if (!fs.existsSync(scriptToExecute)) {
         return reject(new Error(`Server script not found at ${scriptToExecute}. Compile mcp-server-stdio.ts to JS or ensure ts-node is available.`));
     }
 
@@ -113,7 +115,7 @@ const expect = (actual: any) => ({
 // --- Test Data ---
 const validInitParams = { birthDate: "1990-03-15", birthTimeIndex: 5, gender: "男", isLunar: false, fixLeap: true };
 const initRequestLine = (requestId: string) => JSON.stringify({ requestId, toolId: "MCP-SYS-01", params: validInitParams });
-const initFemaleRequestLine = (requestId: string) => JSON.stringify({ requestId, toolId: "MCP-SYS-01", params: { ...validInitParams, gender: "女"} });
+// @ts-eslint/no-unused-vars: const initFemaleRequestLine = (requestId: string) => JSON.stringify({ requestId, toolId: "MCP-SYS-01", params: { ...validInitParams, gender: "女"} });
 
 
 // --- Test Cases ---
@@ -218,7 +220,7 @@ async function testAutoExecuteMatchingCombination() {
 
   const storeRes1 = JSON.parse(processOutput.stdout[0]);
   const combo1Id = storeRes1.data.id;
-  const storeRes2 = JSON.parse(processOutput.stdout[1]); // combo2Id not needed for positive assertion
+  // @ts-eslint/no-unused-vars: const storeRes2 = JSON.parse(processOutput.stdout[1]); // combo2Id not needed for positive assertion
 
   const initResponse = JSON.parse(processOutput.stdout[2]);
   expect(initResponse.requestId).toBe(reqIdInit);
@@ -343,7 +345,7 @@ async function runAllAvailableTests() {
 }
 
 if (require.main === module) {
-  if (commandToExecute === 'ts-node' || require('fs').existsSync(scriptToExecute)) {
+  if (commandToExecute === 'ts-node' || fs.existsSync(scriptToExecute)) {
     console.log(`Attempting to run tests using ${commandToExecute} for ${scriptToExecute}...`);
     runAllAvailableTests();
   } else {

@@ -852,8 +852,7 @@ export interface StarCombinationMeaning {
  */
 export type QueryStarCombinationMeaningFunctionOutput = StarCombinationMeaning;
 
-
-console.log("TypeScript definitions for iztro backend tools, including Advanced Support Layer, updated.");
+// console.log("TypeScript definitions for iztro backend tools, including Advanced Support Layer, updated.");
 
 [end of mcp-tools.ts]
 
