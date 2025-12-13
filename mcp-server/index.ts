@@ -7,7 +7,7 @@ import {
 import * as iztro from "../src/index";
 import { IFunctionalAstrolabe } from "../src/astro/FunctionalAstrolabe";
 import { IFunctionalPalace } from "../src/astro/FunctionalPalace";
-import { PalaceName } from "../src/i18n";
+import { PalaceName, HeavenlyStemName } from "../src/i18n";
 
 // --- State Management ---
 let currentAstrolabe: IFunctionalAstrolabe | null = null;
@@ -33,25 +33,24 @@ const getChartBasics = async (args: any) => {
   // If arguments are provided, generate a new chart.
   if (args.birthday && args.birthTime && args.gender) {
     const { birthday, birthTime, gender } = args;
-    // Basic parsing, assuming birthday is YYYY-MM-DD and birthTime is index 0-12
 
-    // Accessing via iztro.astro.bySolar
     currentAstrolabe = iztro.astro.bySolar(birthday, Number(birthTime), gender === "male" ? "男" : "女", true, "zh-CN");
   } else if (!currentAstrolabe) {
       throw new Error("Please provide birthday, birthTime (0-12), and gender (male/female) to initialize the chart.");
   }
 
   const chart = currentAstrolabe;
-  // chart.body is the NAME of the body palace (string/StarName/PalaceName) in IFunctionalAstrolabe definition
-  // wait, let's check definition.
-  // FunctionalAstrolabe.ts: body: t(earthlyBranches[earthlyBranchOfYear].body) -> This seems to be a string name.
-  // The method `palace(indexOrName)` takes number | PalaceName.
-  // We need to be careful about types.
 
-  const bodyPalace = chart.palace(chart.body as PalaceName);
-  const soulPalace = chart.palace(chart.soul as PalaceName);
+  // FIX: Retrieve Soul (Life) and Body Palaces correctly.
+  // 'soul' and 'body' properties on chart are Star Names (e.g. "Lian Zhen").
+  // We need the actual Palace objects.
 
-  // fiveElementsClass is like "木三局"
+  // Life Palace is always named "命宫" in the palaces list.
+  const lifePalace = chart.palace("命宫");
+
+  // Body Palace is the one where isBodyPalace is true.
+  const bodyPalace = chart.palaces.find(p => p.isBodyPalace);
+
   return {
     content: [
       {
@@ -62,9 +61,11 @@ const getChartBasics = async (args: any) => {
           lunarDate: chart.lunarDate,
           chineseDate: chart.chineseDate,
           fiveElementsClass: chart.fiveElementsClass,
-          soulPalaceBranch: soulPalace?.earthlyBranch, // 命宫地支
-          bodyPalaceBranch: bodyPalace?.earthlyBranch, // 身宫地支
-          bodyPalaceLocation: chart.body, // 身宫所在的宫位名称
+          soulPalaceBranch: lifePalace?.earthlyBranch, // Life Palace Branch
+          bodyPalaceBranch: bodyPalace?.earthlyBranch, // Body Palace Branch
+          bodyPalaceLocation: bodyPalace?.name, // Body Palace Name (e.g. "Wealth")
+          soulStar: chart.soul, // "Soul" (Ming Zhu) Star
+          bodyStar: chart.body  // "Body" (Shen Zhu) Star
         }, null, 2),
       },
     ],
@@ -124,9 +125,6 @@ const getStarsInPalace = async (args: any) => {
 const getStarAttributes = async (args: any) => {
   const chart = requireChart();
   const { starName } = args;
-  // starName must be StarName type, but string is usually fine at runtime if it matches.
-  // We cast to any to avoid strict enum checks if needed, or assume library handles strings.
-  // star() takes StarName.
   const star = chart.star(starName as any);
 
   if (!star) throw new Error(`Star '${starName}' not found in current chart.`);
@@ -187,8 +185,9 @@ const getAnHePalace = async (args: any) => {
     const p = chart.palace(palaceName as PalaceName);
     if (!p) throw new Error("Palace not found");
 
+    // Earthly Branch Liu He (Six Harmonies) - Structural Dark Join
     const branch = p.earthlyBranch;
-    const pairs: Record<string, string> = {
+    const branchPairs: Record<string, string> = {
         "子": "丑", "丑": "子",
         "寅": "亥", "亥": "寅",
         "卯": "戌", "戌": "卯",
@@ -196,16 +195,45 @@ const getAnHePalace = async (args: any) => {
         "巳": "申", "申": "巳",
         "午": "未", "未": "午"
     };
+    const targetBranch = branchPairs[branch];
+    const liuHePalace = chart.palaces.find(tp => tp.earthlyBranch === targetBranch);
 
-    const targetBranch = pairs[branch];
-    const targetPalace = chart.palaces.find(tp => tp.earthlyBranch === targetBranch);
+    // Heavenly Stem Gan He (Stem Combinations) - Motivational/Hidden Dark Join
+    const stem = p.heavenlyStem;
+    // Map simplified stems to their pairs: Jia-Ji, Yi-Geng, Bing-Xin, Ding-Ren, Wu-Gui
+    const stemPairs: Record<string, string> = {
+        "甲": "己", "己": "甲",
+        "乙": "庚", "庚": "乙",
+        "丙": "辛", "辛": "丙",
+        "丁": "壬", "壬": "丁",
+        "戊": "癸", "癸": "戊"
+    };
+
+    const targetStem = stemPairs[stem];
+    const ganHePalaces = chart.palaces.filter(tp => tp.heavenlyStem === targetStem);
 
     return {
         content: [{ type: "text", text: JSON.stringify({
             source: p.name,
             sourceBranch: branch,
-            anHePalace: targetPalace?.name,
+            sourceStem: stem,
+
+            // Earthly Branch AnHe (Liu He)
+            liuHePalace: {
+                name: liuHePalace?.name,
+                branch: targetBranch
+            },
+
+            // Heavenly Stem AnHe (Gan He)
+            ganHePalaces: ganHePalaces.map(gp => ({
+                name: gp.name,
+                stem: gp.heavenlyStem
+            })),
+
+            // Legacy field for backward compatibility or simple view (preferring Liu He as "The" AnHe if forced to choose one, but returning both is better)
+            anHePalace: liuHePalace?.name,
             anHeBranch: targetBranch
+
         }, null, 2) }]
     };
 };
