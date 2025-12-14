@@ -9,6 +9,7 @@ import {
   HeavenlyStemKey,
   HeavenlyStemName,
   StarKey,
+  StarName,
   kot,
   setLanguage,
   t,
@@ -31,7 +32,7 @@ const _brightness: Partial<Record<StarKey, BrightnessKey[]>> = {};
  * normal：正月初一分界
  * exact：立春分界
  */
-let _yearDivide: 'normal' | 'exact' = 'exact';
+let _yearDivide: 'normal' | 'exact' = 'normal';
 let _horoscopeDivide: 'normal' | 'exact' = 'exact';
 
 /**
@@ -44,6 +45,8 @@ let _horoscopeDivide: 'normal' | 'exact' = 'exact';
  * birthday: 以生日为分界点
  */
 let _ageDivide: 'normal' | 'birthday' = 'normal';
+
+let _dayDivide: 'current' | 'forward' = 'forward';
 
 /**
  * 排盘派别设置。
@@ -94,6 +97,7 @@ export const config = ({
   yearDivide = _yearDivide,
   ageDivide = _ageDivide,
   horoscopeDivide = _horoscopeDivide,
+  dayDivide = _dayDivide,
   algorithm = _algorithm,
 }: Config) => {
   if (mutagens) {
@@ -112,6 +116,7 @@ export const config = ({
   _horoscopeDivide = horoscopeDivide;
   _ageDivide = ageDivide;
   _algorithm = algorithm;
+  _dayDivide = dayDivide;
 };
 
 export const getConfig = () => ({
@@ -119,6 +124,7 @@ export const getConfig = () => ({
   brightness: _brightness,
   yearDivide: _yearDivide,
   ageDivide: _ageDivide,
+  dayDivide: _dayDivide,
   horoscopeDivide: _horoscopeDivide,
   algorithm: _algorithm,
 });
@@ -165,34 +171,42 @@ export function bySolar<T extends FunctionalAstrolabe>(
   language && setLanguage(language);
 
   const palaces: IFunctionalPalace[] = [];
-  const { yearly } = getHeavenlyStemAndEarthlyBranchBySolarDate(solarDate, timeIndex, {
+  const { dayDivide } = getConfig();
+  let tIndex = timeIndex;
+
+  if (dayDivide === 'current' && tIndex >= 12) {
+    // 如果当前时辰为晚子时并且晚子时算当天时，将时辰调整为当日子时
+    tIndex = 0;
+  }
+
+  const { yearly } = getHeavenlyStemAndEarthlyBranchBySolarDate(solarDate, tIndex, {
     year: getConfig().yearDivide,
   });
   const earthlyBranchOfYear = kot<EarthlyBranchKey>(yearly[1], 'Earthly');
   const heavenlyStemOfYear = kot<HeavenlyStemKey>(yearly[0], 'Heavenly');
   const { bodyIndex, soulIndex, heavenlyStemOfSoul, earthlyBranchOfSoul } = getSoulAndBody({
     solarDate,
-    timeIndex,
+    timeIndex: tIndex,
     fixLeap,
   });
   const palaceNames = getPalaceNames(soulIndex);
-  const majorStars = getMajorStar({ solarDate, timeIndex, fixLeap });
-  const minorStars = getMinorStar(solarDate, timeIndex, fixLeap);
+  const majorStars = getMajorStar({ solarDate, timeIndex: tIndex, fixLeap });
+  const minorStars = getMinorStar(solarDate, tIndex, fixLeap);
   const adjectiveStars = getAdjectiveStar({
     solarDate,
-    timeIndex,
+    timeIndex: tIndex,
     gender,
     fixLeap,
   });
   const changsheng12 = getchangsheng12({
     solarDate,
-    timeIndex,
+    timeIndex: tIndex,
     gender,
     fixLeap,
   });
   const boshi12 = getBoShi12(solarDate, gender);
   const { jiangqian12, suiqian12 } = getYearly12(solarDate);
-  const { decadals, ages } = getHoroscope({ solarDate, timeIndex, gender, fixLeap });
+  const { decadals, ages } = getHoroscope({ solarDate, timeIndex: tIndex, gender, fixLeap });
 
   for (let i = 0; i < 12; i++) {
     const heavenlyStemOfPalace =
@@ -229,8 +243,15 @@ export function bySolar<T extends FunctionalAstrolabe>(
 
   const chineseDate = getHeavenlyStemAndEarthlyBranchBySolarDate(solarDate, timeIndex, {
     year: getConfig().yearDivide,
+    month: getConfig().horoscopeDivide,
   });
   const lunarDate = solar2lunar(solarDate);
+
+  // 中州派地支以年支找命主
+  // 通用派别以命宫地支找命主
+  const soul = t<StarName>(
+    earthlyBranches[getConfig().algorithm === 'zhongzhou' ? earthlyBranchOfYear : earthlyBranchOfSoulPalace].soul,
+  );
 
   const result = new FunctionalAstrolabe({
     gender: t(kot<GenderName>(gender)),
@@ -244,7 +265,7 @@ export function bySolar<T extends FunctionalAstrolabe>(
     zodiac: getZodiacBySolarDate(solarDate, language),
     earthlyBranchOfSoulPalace: t<EarthlyBranchName>(earthlyBranchOfSoulPalace),
     earthlyBranchOfBodyPalace,
-    soul: t(earthlyBranches[earthlyBranchOfSoulPalace].soul),
+    soul,
     body: t(earthlyBranches[earthlyBranchOfYear].body),
     fiveElementsClass: getFiveElementsClass(heavenlyStemOfSoul, earthlyBranchOfSoul),
     palaces,
@@ -342,6 +363,8 @@ export function rearrangeAstrolable<T extends FunctionalAstrolabe>({
     palace.ages = ages[i];
     palace.isBodyPalace = bodyIndex === i;
   });
+
+  astrolable.earthlyBranchOfSoulPalace = t(astrolable.palace('命宫')!.earthlyBranch);
 
   return astrolable;
 }
