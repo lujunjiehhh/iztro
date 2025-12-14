@@ -23,7 +23,7 @@ let currentAstrolabe: IFunctionalAstrolabe | null = null;
 function requireChart(): IFunctionalAstrolabe {
   if (!currentAstrolabe) {
     throw new Error(
-      "No chart is currently active. Please use 'Get_Chart_Basics' or 'Set_Chart' first."
+      "No chart is currently active. Please use 'Get_Chart_Basics' first."
     );
   }
   return currentAstrolabe;
