@@ -5,6 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createRequire } from "node:module";
+
 // Avoid importing from ../src directly at runtime.
 // The server runs as ESM, while the library build output is CJS. We load the CJS build via require.
 import type * as IztroTypes from "../lib/index.js";
@@ -88,7 +89,7 @@ const getChartBasics = async (rawArgs: unknown) => {
         birthTime,
         gender === 'male' ? '男' : '女',
         true,
-        language,
+        language as any,
       );
   } else if (!currentAstrolabe) {
       throw new Error("Please provide birthday, birthTime (0-12), and gender (male/female) to initialize the chart.");
@@ -268,7 +269,6 @@ const getAnHePalace = async (rawArgs: unknown) => {
 
     // Heavenly Stem Gan He (Stem Combinations) - Motivational/Hidden Dark Join
     const stem = p.heavenlyStem;
-    // Map simplified stems to their pairs: Jia-Ji, Yi-Geng, Bing-Xin, Ding-Ren, Wu-Gui
     const stemPairs: Record<string, string> = {
         "甲": "己", "己": "甲",
         "乙": "庚", "庚": "乙",
@@ -298,7 +298,6 @@ const getAnHePalace = async (rawArgs: unknown) => {
                 stem: gp.heavenlyStem
             })),
 
-            // Legacy field for backward compatibility or simple view (preferring Liu He as "The" AnHe if forced to choose one, but returning both is better)
             anHePalace: liuHePalace?.name,
             anHeBranch: targetBranch
 
@@ -385,11 +384,7 @@ async function main() {
               birthday: { type: "string", description: "Solar Date YYYY-MM-DD" },
               birthTime: { type: "number", description: "Time Index 0-12" },
               gender: { type: "string", enum: ["male", "female"] },
-              language: {
-                type: "string",
-                enum: ["zh-CN", "zh-TW", "en-US", "ja-JP", "ko-KR", "vi-VN"],
-                description: "Output language for palace/star names.",
-              }
+              language: { type: "string", description: "Optional language code (e.g. zh-CN, en-US)" }
             },
           },
         },
@@ -399,7 +394,7 @@ async function main() {
           inputSchema: {
               type: "object",
               properties: {
-                  palaceName: { type: "string", description: "Palace name (must match the chart language) or 'All'. Tip: call Get_Palace_Info with 'All' to discover available names." }
+                  palaceName: { type: "string", description: "Name of palace (e.g. 命宫) or 'All'" }
               },
               required: ["palaceName"]
           }
@@ -479,29 +474,26 @@ async function main() {
     };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request: unknown) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
-      const req = request as { params?: { name?: string; arguments?: unknown } };
-      const name = req.params?.name;
-      const args = req.params?.arguments;
-
-      switch (name) {
-        case "Get_Chart_Basics": return await getChartBasics(args);
-        case "Get_Palace_Info": return await getPalaceInfo(args);
-        case "Get_Stars_In_Palace": return await getStarsInPalace(args);
-        case "Get_Star_Attributes": return await getStarAttributes(args);
-        case "Get_Natal_SiHua": return await getNatalSiHua();
-        case "Get_SanFang_SiZheng": return await getSanFangSiZheng(args);
-        case "Get_AnHe_Palace": return await getAnHePalace(args);
-        case "Get_ChongZhao_Palace": return await getChongZhaoPalace(args);
-        case "Get_Jia_Gong_Info": return await getJiaGongInfo(args);
+      const toolName = request.params.name;
+      // Note: We use the tool functions defined above which handle validation
+      switch (toolName) {
+        case "Get_Chart_Basics": return await getChartBasics(request.params.arguments);
+        case "Get_Palace_Info": return await getPalaceInfo(request.params.arguments);
+        case "Get_Stars_In_Palace": return await getStarsInPalace(request.params.arguments);
+        case "Get_Star_Attributes": return await getStarAttributes(request.params.arguments);
+        case "Get_Natal_SiHua": return await getNatalSiHua(); // No args
+        case "Get_SanFang_SiZheng": return await getSanFangSiZheng(request.params.arguments);
+        case "Get_AnHe_Palace": return await getAnHePalace(request.params.arguments);
+        case "Get_ChongZhao_Palace": return await getChongZhaoPalace(request.params.arguments);
+        case "Get_Jia_Gong_Info": return await getJiaGongInfo(request.params.arguments);
         default:
           throw new Error("Unknown tool");
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+    } catch (error: any) {
       return {
-        content: [{ type: "text", text: `Error: ${message}` }],
+        content: [{ type: "text", text: `Error: ${error.message}` }],
         isError: true,
       };
     }
