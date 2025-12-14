@@ -9,5 +9,5 @@
     "resolveJsonModule": true,
     "outDir": "../dist-mcp"
   },
-  "include": ["./**/*.ts", "../src/**/*.ts"]
+  "include": ["./**/*.ts"]
 }

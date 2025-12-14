@@ -4,10 +4,17 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import * as iztro from "../src/index";
-import { IFunctionalAstrolabe } from "../src/astro/FunctionalAstrolabe";
-import { IFunctionalPalace } from "../src/astro/FunctionalPalace";
-import { PalaceName, HeavenlyStemName } from "../src/i18n";
+import { createRequire } from "node:module";
+// Avoid importing from ../src directly at runtime.
+// The server runs as ESM, while the library build output is CJS. We load the CJS build via require.
+import type * as IztroTypes from "../lib/index.js";
+import type { IFunctionalAstrolabe } from "../lib/astro/FunctionalAstrolabe.js";
+import type { IFunctionalPalace } from "../lib/astro/FunctionalPalace.js";
+import type { PalaceName, StarName } from "../lib/i18n/index.js";
+
+const require = createRequire(import.meta.url);
+// NOTE: This requires the library to be built first (yarn build) so ../lib/index.js exists.
+const iztro = require("../lib/index.js") as typeof IztroTypes;
 
 // --- State Management ---
 // NOTE: Global state is used here for simplicity in a stdio-based MCP server where the process
@@ -29,42 +36,70 @@ function requireChart(): IFunctionalAstrolabe {
   return currentAstrolabe;
 }
 
+type ToolArgs = Record<string, unknown>;
+
 /**
  * Validates that arguments object exists
  */
-function validateArgs(args: any) {
-  if (!args || typeof args !== 'object') {
-    throw new Error("Invalid arguments: Expected an object.");
+function validateArgs(args: unknown): ToolArgs {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new Error('Invalid arguments: Expected an object.');
   }
-  return args;
+
+  return args as ToolArgs;
+}
+
+function getPalaces(chart: IFunctionalAstrolabe): IFunctionalPalace[] {
+  return chart.palaces as unknown as IFunctionalPalace[];
+}
+
+/**
+ * Resolve the soul (life) palace without hardcoding locale-specific palace names.
+ * We instead match by the chart's `earthlyBranchOfSoulPalace`, which is already localized
+ * consistently with each palace's `earthlyBranch`.
+ */
+function getSoulPalace(chart: IFunctionalAstrolabe): IFunctionalPalace | undefined {
+  return getPalaces(chart).find((p) => p.earthlyBranch === chart.earthlyBranchOfSoulPalace);
 }
 
 // --- Tool Implementations ---
 
 // MCP-F01: Get_Chart_Basics
-const getChartBasics = async (rawArgs: any) => {
-  const args = rawArgs || {}; // Handle null/undefined args safely
+const getChartBasics = async (rawArgs: unknown) => {
+  const args = (rawArgs ?? {}) as ToolArgs; // Handle null/undefined args safely
 
   const hasAnyChartArg = args.birthday || args.birthTime !== undefined || args.gender;
 
   if (hasAnyChartArg) {
       // Fix: Check for strictly valid birthTime (non-null number)
       if (!args.birthday || typeof args.birthTime !== 'number' || !args.gender) {
-          throw new Error("Incomplete chart arguments. To initialize or update the chart, you must provide all three: birthday, birthTime (number 0-12), and gender.");
+        throw new Error(
+          'Incomplete chart arguments. To initialize or update the chart, you must provide all three: birthday, birthTime (number 0-12), and gender.',
+        );
       }
-      const { birthday, birthTime, gender } = args;
-      currentAstrolabe = iztro.astro.bySolar(birthday, Number(birthTime), gender === "male" ? "男" : "女", true, "zh-CN");
+
+      const birthday = String(args.birthday);
+      const birthTime = Number(args.birthTime);
+      const gender = String(args.gender);
+      // Optional language: "zh-CN" | "zh-TW" | "en-US" | "ja-JP" | "ko-KR" | "vi-VN"
+      const language = typeof args.language === 'string' ? args.language : undefined;
+      currentAstrolabe = iztro.astro.bySolar(
+        birthday,
+        birthTime,
+        gender === 'male' ? '男' : '女',
+        true,
+        language,
+      );
   } else if (!currentAstrolabe) {
       throw new Error("Please provide birthday, birthTime (0-12), and gender (male/female) to initialize the chart.");
   }
 
   const chart = currentAstrolabe;
 
-  // Life Palace is always named "命宫" in the palaces list.
-  const lifePalace = chart.palace("命宫");
+  const lifePalace = getSoulPalace(chart);
 
   // Body Palace is the one where isBodyPalace is true.
-  const bodyPalace = chart.palaces.find(p => p.isBodyPalace);
+  const bodyPalace = getPalaces(chart).find((p) => p.isBodyPalace);
 
   return {
     content: [
@@ -88,24 +123,24 @@ const getChartBasics = async (rawArgs: any) => {
 };
 
 // MCP-F02: Get_Palace_Info
-const getPalaceInfo = async (rawArgs: any) => {
+const getPalaceInfo = async (rawArgs: unknown) => {
   const args = validateArgs(rawArgs);
   const chart = requireChart();
-  const { palaceName } = args;
+  const palaceName = args.palaceName;
 
   if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
   const palacesToReturn: IFunctionalPalace[] = [];
 
-  if (palaceName === "All") {
+  if (palaceName === 'All') {
     palacesToReturn.push(...chart.palaces);
   } else {
-    const p = chart.palace(palaceName as PalaceName);
+    const p = chart.palace(String(palaceName) as PalaceName);
     if (p) palacesToReturn.push(p);
     else throw new Error(`Palace '${palaceName}' not found.`);
   }
 
-  const result = palacesToReturn.map(p => ({
+  const result = palacesToReturn.map((p) => ({
     name: p.name,
     earthlyBranch: p.earthlyBranch,
     heavenlyStem: p.heavenlyStem,
@@ -117,14 +152,14 @@ const getPalaceInfo = async (rawArgs: any) => {
 };
 
 // MCP-F03: Get_Stars_In_Palace
-const getStarsInPalace = async (rawArgs: any) => {
+const getStarsInPalace = async (rawArgs: unknown) => {
   const args = validateArgs(rawArgs);
   const chart = requireChart();
-  const { palaceName } = args;
+  const palaceName = args.palaceName;
 
   if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
-  const p = chart.palace(palaceName as PalaceName);
+  const p = chart.palace(String(palaceName) as PalaceName);
 
   if (!p) throw new Error(`Palace '${palaceName}' not found.`);
 
@@ -132,7 +167,7 @@ const getStarsInPalace = async (rawArgs: any) => {
     ...p.majorStars,
     ...p.minorStars,
     ...p.adjectiveStars
-  ].map(s => ({
+  ].map((s) => ({
     name: s.name,
     type: s.type,
     mutagen: s.mutagen
@@ -144,14 +179,14 @@ const getStarsInPalace = async (rawArgs: any) => {
 };
 
 // MCP-F04: Get_Star_Attributes
-const getStarAttributes = async (rawArgs: any) => {
+const getStarAttributes = async (rawArgs: unknown) => {
   const args = validateArgs(rawArgs);
   const chart = requireChart();
-  const { starName } = args;
+  const starName = args.starName;
 
   if (!starName) throw new Error("Argument 'starName' is required.");
 
-  const star = chart.star(starName as any);
+  const star = chart.star(String(starName) as StarName);
 
   if (!star) throw new Error(`Star '${starName}' not found in current chart.`);
 
@@ -165,14 +200,13 @@ const getStarAttributes = async (rawArgs: any) => {
 };
 
 // MCP-F05: Get_Natal_SiHua
-const getNatalSiHua = async (args: any) => {
-    // No args required for this one, but safe to ignore
+const getNatalSiHua = async () => {
     const chart = requireChart();
 
-    const siHuaMap: Record<string, any> = {};
+    const siHuaMap: Record<string, unknown> = {};
 
-    chart.palaces.forEach(p => {
-        [...p.majorStars, ...p.minorStars].forEach(s => {
+    getPalaces(chart).forEach((p) => {
+        [...p.majorStars, ...p.minorStars].forEach((s) => {
             if (s.mutagen) {
                 siHuaMap[s.mutagen] = {
                     star: s.name,
@@ -189,14 +223,14 @@ const getNatalSiHua = async (args: any) => {
 };
 
 // MCP-R01: Get_SanFang_SiZheng
-const getSanFangSiZheng = async (rawArgs: any) => {
+const getSanFangSiZheng = async (rawArgs: unknown) => {
     const args = validateArgs(rawArgs);
     const chart = requireChart();
-    const { palaceName } = args;
+    const palaceName = args.palaceName;
 
     if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
-    const surrounded = chart.surroundedPalaces(palaceName as PalaceName);
+    const surrounded = chart.surroundedPalaces(String(palaceName) as PalaceName);
 
     return {
         content: [{ type: "text", text: JSON.stringify({
@@ -209,14 +243,14 @@ const getSanFangSiZheng = async (rawArgs: any) => {
 };
 
 // MCP-R02: Get_AnHe_Palace
-const getAnHePalace = async (rawArgs: any) => {
+const getAnHePalace = async (rawArgs: unknown) => {
     const args = validateArgs(rawArgs);
     const chart = requireChart();
-    const { palaceName } = args;
+    const palaceName = args.palaceName;
 
     if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
-    const p = chart.palace(palaceName as PalaceName);
+    const p = chart.palace(String(palaceName) as PalaceName);
     if (!p) throw new Error("Palace not found");
 
     // Earthly Branch Liu He (Six Harmonies) - Structural Dark Join
@@ -230,7 +264,7 @@ const getAnHePalace = async (rawArgs: any) => {
         "午": "未", "未": "午"
     };
     const targetBranch = branchPairs[branch];
-    const liuHePalace = chart.palaces.find(tp => tp.earthlyBranch === targetBranch);
+    const liuHePalace = getPalaces(chart).find((tp) => tp.earthlyBranch === targetBranch);
 
     // Heavenly Stem Gan He (Stem Combinations) - Motivational/Hidden Dark Join
     const stem = p.heavenlyStem;
@@ -244,7 +278,7 @@ const getAnHePalace = async (rawArgs: any) => {
     };
 
     const targetStem = stemPairs[stem];
-    const ganHePalaces = chart.palaces.filter(tp => tp.heavenlyStem === targetStem);
+    const ganHePalaces = getPalaces(chart).filter((tp) => tp.heavenlyStem === targetStem);
 
     return {
         content: [{ type: "text", text: JSON.stringify({
@@ -259,7 +293,7 @@ const getAnHePalace = async (rawArgs: any) => {
             },
 
             // Heavenly Stem AnHe (Gan He)
-            ganHePalaces: ganHePalaces.map(gp => ({
+            ganHePalaces: ganHePalaces.map((gp) => ({
                 name: gp.name,
                 stem: gp.heavenlyStem
             })),
@@ -273,14 +307,14 @@ const getAnHePalace = async (rawArgs: any) => {
 };
 
 // MCP-R03: Get_ChongZhao_Palace
-const getChongZhaoPalace = async (rawArgs: any) => {
+const getChongZhaoPalace = async (rawArgs: unknown) => {
     const args = validateArgs(rawArgs);
     const chart = requireChart();
-    const { palaceName } = args;
+    const palaceName = args.palaceName;
 
     if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
-    const surrounded = chart.surroundedPalaces(palaceName as PalaceName);
+    const surrounded = chart.surroundedPalaces(String(palaceName) as PalaceName);
 
     return {
         content: [{ type: "text", text: JSON.stringify({
@@ -291,14 +325,14 @@ const getChongZhaoPalace = async (rawArgs: any) => {
 };
 
 // MCP-R04: Get_Jia_Gong_Info
-const getJiaGongInfo = async (rawArgs: any) => {
+const getJiaGongInfo = async (rawArgs: unknown) => {
     const args = validateArgs(rawArgs);
     const chart = requireChart();
-    const { palaceName } = args;
+    const palaceName = args.palaceName;
 
     if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
-    const p = chart.palace(palaceName as PalaceName);
+    const p = chart.palace(String(palaceName) as PalaceName);
     if (!p) throw new Error("Palace not found");
 
     const idx = p.index;
@@ -313,11 +347,11 @@ const getJiaGongInfo = async (rawArgs: any) => {
             source: p.name,
             previousPalace: {
                 name: prevPalace?.name,
-                stars: prevPalace?.majorStars.map(s => s.name)
+                stars: prevPalace?.majorStars.map((s) => s.name)
             },
             nextPalace: {
                 name: nextPalace?.name,
-                stars: nextPalace?.majorStars.map(s => s.name)
+                stars: nextPalace?.majorStars.map((s) => s.name)
             }
         }, null, 2) }]
     };
@@ -350,7 +384,12 @@ async function main() {
             properties: {
               birthday: { type: "string", description: "Solar Date YYYY-MM-DD" },
               birthTime: { type: "number", description: "Time Index 0-12" },
-              gender: { type: "string", enum: ["male", "female"] }
+              gender: { type: "string", enum: ["male", "female"] },
+              language: {
+                type: "string",
+                enum: ["zh-CN", "zh-TW", "en-US", "ja-JP", "ko-KR", "vi-VN"],
+                description: "Output language for palace/star names.",
+              }
             },
           },
         },
@@ -360,7 +399,7 @@ async function main() {
           inputSchema: {
               type: "object",
               properties: {
-                  palaceName: { type: "string", description: "Name of palace (e.g. 命宫) or 'All'" }
+                  palaceName: { type: "string", description: "Palace name (must match the chart language) or 'All'. Tip: call Get_Palace_Info with 'All' to discover available names." }
               },
               required: ["palaceName"]
           }
@@ -440,24 +479,29 @@ async function main() {
     };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request: unknown) => {
     try {
-      switch (request.params.name) {
-        case "Get_Chart_Basics": return await getChartBasics(request.params.arguments);
-        case "Get_Palace_Info": return await getPalaceInfo(request.params.arguments);
-        case "Get_Stars_In_Palace": return await getStarsInPalace(request.params.arguments);
-        case "Get_Star_Attributes": return await getStarAttributes(request.params.arguments);
-        case "Get_Natal_SiHua": return await getNatalSiHua(request.params.arguments);
-        case "Get_SanFang_SiZheng": return await getSanFangSiZheng(request.params.arguments);
-        case "Get_AnHe_Palace": return await getAnHePalace(request.params.arguments);
-        case "Get_ChongZhao_Palace": return await getChongZhaoPalace(request.params.arguments);
-        case "Get_Jia_Gong_Info": return await getJiaGongInfo(request.params.arguments);
+      const req = request as { params?: { name?: string; arguments?: unknown } };
+      const name = req.params?.name;
+      const args = req.params?.arguments;
+
+      switch (name) {
+        case "Get_Chart_Basics": return await getChartBasics(args);
+        case "Get_Palace_Info": return await getPalaceInfo(args);
+        case "Get_Stars_In_Palace": return await getStarsInPalace(args);
+        case "Get_Star_Attributes": return await getStarAttributes(args);
+        case "Get_Natal_SiHua": return await getNatalSiHua();
+        case "Get_SanFang_SiZheng": return await getSanFangSiZheng(args);
+        case "Get_AnHe_Palace": return await getAnHePalace(args);
+        case "Get_ChongZhao_Palace": return await getChongZhaoPalace(args);
+        case "Get_Jia_Gong_Info": return await getJiaGongInfo(args);
         default:
           throw new Error("Unknown tool");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       return {
-        content: [{ type: "text", text: `Error: ${error.message}` }],
+        content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
       };
     }
