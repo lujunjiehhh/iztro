@@ -48,8 +48,9 @@ const getChartBasics = async (rawArgs: any) => {
   const hasAnyChartArg = args.birthday || args.birthTime !== undefined || args.gender;
 
   if (hasAnyChartArg) {
-      if (!args.birthday || args.birthTime === undefined || !args.gender) {
-          throw new Error("Incomplete chart arguments. To initialize or update the chart, you must provide all three: birthday, birthTime, and gender.");
+      // Fix: Check for strictly valid birthTime (non-null number)
+      if (!args.birthday || typeof args.birthTime !== 'number' || !args.gender) {
+          throw new Error("Incomplete chart arguments. To initialize or update the chart, you must provide all three: birthday, birthTime (number 0-12), and gender.");
       }
       const { birthday, birthTime, gender } = args;
       currentAstrolabe = iztro.astro.bySolar(birthday, Number(birthTime), gender === "male" ? "男" : "女", true, "zh-CN");
