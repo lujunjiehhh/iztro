@@ -45,12 +45,14 @@ function validateArgs(args: any) {
 const getChartBasics = async (rawArgs: any) => {
   const args = rawArgs || {}; // Handle null/undefined args safely
 
-  // If arguments are provided, generate a new chart.
-  // Fix: Check birthTime !== undefined explicitly to allow 0 (early Rat hour)
-  if (args.birthday && args.birthTime !== undefined && args.gender) {
-    const { birthday, birthTime, gender } = args;
+  const hasAnyChartArg = args.birthday || args.birthTime !== undefined || args.gender;
 
-    currentAstrolabe = iztro.astro.bySolar(birthday, Number(birthTime), gender === "male" ? "男" : "女", true, "zh-CN");
+  if (hasAnyChartArg) {
+      if (!args.birthday || args.birthTime === undefined || !args.gender) {
+          throw new Error("Incomplete chart arguments. To initialize or update the chart, you must provide all three: birthday, birthTime, and gender.");
+      }
+      const { birthday, birthTime, gender } = args;
+      currentAstrolabe = iztro.astro.bySolar(birthday, Number(birthTime), gender === "male" ? "男" : "女", true, "zh-CN");
   } else if (!currentAstrolabe) {
       throw new Error("Please provide birthday, birthTime (0-12), and gender (male/female) to initialize the chart.");
   }
