@@ -10,6 +10,9 @@ import { IFunctionalPalace } from "../src/astro/FunctionalPalace";
 import { PalaceName, HeavenlyStemName } from "../src/i18n";
 
 // --- State Management ---
+// NOTE: Global state is used here for simplicity in a stdio-based MCP server where the process
+// is typically 1-to-1 with the client. For multi-user HTTP servers, a session-based approach
+// (e.g., Map<string, Astrolabe>) would be required.
 let currentAstrolabe: IFunctionalAstrolabe | null = null;
 
 // --- Helper Functions ---
@@ -26,12 +29,25 @@ function requireChart(): IFunctionalAstrolabe {
   return currentAstrolabe;
 }
 
+/**
+ * Validates that arguments object exists
+ */
+function validateArgs(args: any) {
+  if (!args || typeof args !== 'object') {
+    throw new Error("Invalid arguments: Expected an object.");
+  }
+  return args;
+}
+
 // --- Tool Implementations ---
 
 // MCP-F01: Get_Chart_Basics
-const getChartBasics = async (args: any) => {
+const getChartBasics = async (rawArgs: any) => {
+  const args = rawArgs || {}; // Handle null/undefined args safely
+
   // If arguments are provided, generate a new chart.
-  if (args.birthday && args.birthTime && args.gender) {
+  // Fix: Check birthTime !== undefined explicitly to allow 0 (early Rat hour)
+  if (args.birthday && args.birthTime !== undefined && args.gender) {
     const { birthday, birthTime, gender } = args;
 
     currentAstrolabe = iztro.astro.bySolar(birthday, Number(birthTime), gender === "male" ? "男" : "女", true, "zh-CN");
@@ -40,10 +56,6 @@ const getChartBasics = async (args: any) => {
   }
 
   const chart = currentAstrolabe;
-
-  // FIX: Retrieve Soul (Life) and Body Palaces correctly.
-  // 'soul' and 'body' properties on chart are Star Names (e.g. "Lian Zhen").
-  // We need the actual Palace objects.
 
   // Life Palace is always named "命宫" in the palaces list.
   const lifePalace = chart.palace("命宫");
@@ -73,9 +85,12 @@ const getChartBasics = async (args: any) => {
 };
 
 // MCP-F02: Get_Palace_Info
-const getPalaceInfo = async (args: any) => {
+const getPalaceInfo = async (rawArgs: any) => {
+  const args = validateArgs(rawArgs);
   const chart = requireChart();
   const { palaceName } = args;
+
+  if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
   const palacesToReturn: IFunctionalPalace[] = [];
 
@@ -99,9 +114,13 @@ const getPalaceInfo = async (args: any) => {
 };
 
 // MCP-F03: Get_Stars_In_Palace
-const getStarsInPalace = async (args: any) => {
+const getStarsInPalace = async (rawArgs: any) => {
+  const args = validateArgs(rawArgs);
   const chart = requireChart();
   const { palaceName } = args;
+
+  if (!palaceName) throw new Error("Argument 'palaceName' is required.");
+
   const p = chart.palace(palaceName as PalaceName);
 
   if (!p) throw new Error(`Palace '${palaceName}' not found.`);
@@ -122,9 +141,13 @@ const getStarsInPalace = async (args: any) => {
 };
 
 // MCP-F04: Get_Star_Attributes
-const getStarAttributes = async (args: any) => {
+const getStarAttributes = async (rawArgs: any) => {
+  const args = validateArgs(rawArgs);
   const chart = requireChart();
   const { starName } = args;
+
+  if (!starName) throw new Error("Argument 'starName' is required.");
+
   const star = chart.star(starName as any);
 
   if (!star) throw new Error(`Star '${starName}' not found in current chart.`);
@@ -140,6 +163,7 @@ const getStarAttributes = async (args: any) => {
 
 // MCP-F05: Get_Natal_SiHua
 const getNatalSiHua = async (args: any) => {
+    // No args required for this one, but safe to ignore
     const chart = requireChart();
 
     const siHuaMap: Record<string, any> = {};
@@ -162,9 +186,12 @@ const getNatalSiHua = async (args: any) => {
 };
 
 // MCP-R01: Get_SanFang_SiZheng
-const getSanFangSiZheng = async (args: any) => {
+const getSanFangSiZheng = async (rawArgs: any) => {
+    const args = validateArgs(rawArgs);
     const chart = requireChart();
     const { palaceName } = args;
+
+    if (!palaceName) throw new Error("Argument 'palaceName' is required.");
 
     const surrounded = chart.surroundedPalaces(palaceName as PalaceName);
 
@@ -179,9 +206,13 @@ const getSanFangSiZheng = async (args: any) => {
 };
 
 // MCP-R02: Get_AnHe_Palace
-const getAnHePalace = async (args: any) => {
+const getAnHePalace = async (rawArgs: any) => {
+    const args = validateArgs(rawArgs);
     const chart = requireChart();
     const { palaceName } = args;
+
+    if (!palaceName) throw new Error("Argument 'palaceName' is required.");
+
     const p = chart.palace(palaceName as PalaceName);
     if (!p) throw new Error("Palace not found");
 
@@ -239,9 +270,13 @@ const getAnHePalace = async (args: any) => {
 };
 
 // MCP-R03: Get_ChongZhao_Palace
-const getChongZhaoPalace = async (args: any) => {
+const getChongZhaoPalace = async (rawArgs: any) => {
+    const args = validateArgs(rawArgs);
     const chart = requireChart();
     const { palaceName } = args;
+
+    if (!palaceName) throw new Error("Argument 'palaceName' is required.");
+
     const surrounded = chart.surroundedPalaces(palaceName as PalaceName);
 
     return {
@@ -253,9 +288,13 @@ const getChongZhaoPalace = async (args: any) => {
 };
 
 // MCP-R04: Get_Jia_Gong_Info
-const getJiaGongInfo = async (args: any) => {
+const getJiaGongInfo = async (rawArgs: any) => {
+    const args = validateArgs(rawArgs);
     const chart = requireChart();
     const { palaceName } = args;
+
+    if (!palaceName) throw new Error("Argument 'palaceName' is required.");
+
     const p = chart.palace(palaceName as PalaceName);
     if (!p) throw new Error("Palace not found");
 
