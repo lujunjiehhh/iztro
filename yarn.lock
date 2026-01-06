@@ -1621,7 +1621,7 @@
 
 "@types/sqlite3@^5.1.0":
   version "5.1.0"
-  resolved "https://registry.yarnpkg.com/@types/sqlite3/-/sqlite3-5.1.0.tgz#fa5c532eed78eeed11b23a59d9e6efaee4ec6e69"
+  resolved "https://registry.npmjs.org/@types/sqlite3/-/sqlite3-5.1.0.tgz"
   integrity sha512-w25Gd6OzcN0Sb6g/BO7cyee0ugkiLgonhgGYfG+H0W9Ub6PUsC2/4R+KXy2tc80faPIWO3Qytbvr8gP1fU4siA==
   dependencies:
     sqlite3 "*"
@@ -4489,7 +4489,7 @@ lru-cache@^6.0.0:
 
 lunar-lite@^0.2.7:
   version "0.2.7"
-  resolved "https://registry.npmjs.org/lunar-lite/-/lunar-lite-0.2.7.tgz#3b68df72870627158acfa31d26d0f5fe9b441bbd"
+  resolved "https://registry.npmjs.org/lunar-lite/-/lunar-lite-0.2.7.tgz"
   integrity sha512-ePsbfKBUhnHINckdb5svyjSiYItxR6BySSmZ5Wjc5yRwKX8nbIVRBB0hwrW/NpZP5SuSXz1TSvuM/TVP9brZmw==
   dependencies:
     lunar-typescript "^1.7.5"
@@ -5580,7 +5580,7 @@ sprintf-js@~1.0.2:
 
 sqlite3@*, sqlite3@^5.1.7:
   version "5.1.7"
-  resolved "https://registry.yarnpkg.com/sqlite3/-/sqlite3-5.1.7.tgz#59ca1053c1ab38647396586edad019b1551041b7"
+  resolved "https://registry.npmjs.org/sqlite3/-/sqlite3-5.1.7.tgz"
   integrity sha512-GGIyOiFaG+TUra3JIfkI/zGP8yZYLPQ0pl1bH+ODjiX57sPhrLU5sQJn1y9bDKZUFYkX1crlrPfSYt0BKKdkog==
   dependencies:
     bindings "^1.5.0"
