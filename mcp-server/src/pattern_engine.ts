@@ -41,6 +41,11 @@ export class PatternEngine {
 
   public addPattern(pattern: Pattern): Promise<number> {
     return new Promise((resolve, reject) => {
+      // Basic sanitization
+      if (pattern.script.includes('process') || pattern.script.includes('require') || pattern.script.includes('import')) {
+         return reject(new Error("Script contains forbidden keywords"));
+      }
+
       const stmt = this.db.prepare(
         'INSERT INTO star_combinations (name, script, description, examples) VALUES (?, ?, ?, ?)'
       );
@@ -64,18 +69,65 @@ export class PatternEngine {
     });
   }
 
+  private secureProxy<T extends object>(target: T): T {
+    const handler: ProxyHandler<T> = {
+      get: (target: T, prop: string | symbol, receiver: any) => {
+        if (prop === 'constructor' || prop === 'prototype' || prop === '__proto__') {
+          return undefined;
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+
+        if (typeof value === 'function') {
+           return (...args: any[]) => {
+               const result = value.apply(target, args);
+               if (result && typeof result === 'object') {
+                   return this.secureProxy(result);
+               }
+               return result;
+           }
+        }
+
+        if (value && typeof value === 'object') {
+          return this.secureProxy(value);
+        }
+
+        return value;
+      },
+      getPrototypeOf: (target: T) => {
+          return null; // Force null prototype to block prototype chain traversal
+      }
+    };
+    return new Proxy(target, handler);
+  }
+
   public async evaluatePatterns(chart: IFunctionalAstrolabe): Promise<Pattern[]> {
     const patterns = await this.getAllPatterns();
     const matches: Pattern[] = [];
 
     // Create a safe context for execution
     // We only expose the 'chart' object.
-    const context = vm.createContext({ chart });
+    const safeChart = this.secureProxy(chart);
+    const context = vm.createContext(Object.create(null, {
+        chart: {
+            value: safeChart,
+            writable: false,
+            enumerable: true,
+            configurable: false
+        }
+    }));
 
     for (const p of patterns) {
       try {
         // The script should evaluate to a boolean
         // e.g. "chart.palace('命宫').has('紫微')"
+
+        // Additional Check: Scan script for dangerous access
+        if (p.script.includes('constructor') || p.script.includes('__proto__')) {
+            // console.warn(`Pattern '${p.name}' rejected due to suspicious keywords.`);
+            continue;
+        }
+
         const result = vm.runInContext(p.script, context, { timeout: 100 });
         if (result === true) {
           matches.push(p);
