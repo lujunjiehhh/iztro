@@ -16,6 +16,30 @@ export interface Pattern {
   examples: string;
 }
 
+// Security function to proxy objects and prevent sandbox escape
+function secureProxy(target: any): any {
+  if (target === null || (typeof target !== 'object' && typeof target !== 'function')) {
+    return target;
+  }
+
+  return new Proxy(target, {
+    get(target, prop, receiver) {
+      if (prop === 'constructor' || prop === '__proto__' || prop === 'prototype') {
+        return undefined;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return secureProxy(value);
+    },
+    apply(target, thisArg, argumentsList) {
+      const result = Reflect.apply(target, thisArg, argumentsList);
+      return secureProxy(result);
+    },
+    getPrototypeOf(target) {
+      return null;
+    }
+  });
+}
+
 export class PatternEngine {
   private db: sqlite3.Database;
 
@@ -69,8 +93,9 @@ export class PatternEngine {
     const matches: Pattern[] = [];
 
     // Create a safe context for execution
-    // We only expose the 'chart' object.
-    const context = vm.createContext({ chart });
+    const safeContext = Object.create(null);
+    safeContext.chart = secureProxy(chart);
+    const context = vm.createContext(safeContext);
 
     for (const p of patterns) {
       try {
