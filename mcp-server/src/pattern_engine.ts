@@ -40,6 +40,12 @@ export class PatternEngine {
   }
 
   public addPattern(pattern: Pattern): Promise<number> {
+    try {
+      this.validateScript(pattern.script);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+
     return new Promise((resolve, reject) => {
       const stmt = this.db.prepare(
         'INSERT INTO star_combinations (name, script, description, examples) VALUES (?, ?, ?, ?)'
@@ -53,6 +59,31 @@ export class PatternEngine {
       );
       stmt.finalize();
     });
+  }
+
+  private validateScript(script: string): void {
+    const dangerousKeywords = [
+      'process',
+      'require',
+      'import',
+      'exec',
+      'spawn',
+      'eval',
+      'Function',
+      'global',
+      '__proto__',
+      'constructor',
+    ];
+
+    // Check for dangerous keywords with word boundaries
+    for (const keyword of dangerousKeywords) {
+      const regex = new RegExp(`\\b${keyword}\\b`);
+      if (regex.test(script)) {
+        throw new Error(
+          `Security Error: Script contains forbidden keyword '${keyword}'.`
+        );
+      }
+    }
   }
 
   public getAllPatterns(): Promise<Pattern[]> {
