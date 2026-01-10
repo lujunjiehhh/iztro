@@ -38,17 +38,14 @@ const getTargetMutagens = (heavenlyStem: HeavenlyStemKey) => {
  * @returns {number} 处理后的索引
  */
 export const fixIndex = (index: number, max: number = 12): number => {
-  if (index < 0) {
-    return fixIndex(index + max, max);
+  let res = index % max;
+
+  if (res < 0) {
+    res += max;
   }
 
-  if (index > max - 1) {
-    return fixIndex(index - max, max);
-  }
-
-  const res = 1 / index === -Infinity ? 0 : index;
-
-  return res;
+  // 1 / res === -Infinity ? 0 : res; to handle -0
+  return res === 0 ? 0 : res;
 };
 
 /**
