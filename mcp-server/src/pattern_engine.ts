@@ -39,7 +39,8 @@ export class PatternEngine {
     )`);
   }
 
-  public addPattern(pattern: Pattern): Promise<number> {
+  public async addPattern(pattern: Pattern): Promise<number> {
+    this.validateScript(pattern.script);
     return new Promise((resolve, reject) => {
       const stmt = this.db.prepare(
         'INSERT INTO star_combinations (name, script, description, examples) VALUES (?, ?, ?, ?)'
@@ -53,6 +54,36 @@ export class PatternEngine {
       );
       stmt.finalize();
     });
+  }
+
+  private validateScript(script: string) {
+    if (script.length > 1000) {
+      throw new Error('Script too long (max 1000 chars)');
+    }
+
+    // Blacklist of dangerous keywords
+    const blacklist = [
+      'process',
+      'require',
+      'eval',
+      'Function',
+      'constructor',
+      '__proto__',
+      'prototype',
+      'import',
+      'global',
+      'globalThis'
+    ];
+
+    for (const word of blacklist) {
+      // Regex to match whole words but allow property access (e.g. "data.process" is safe)
+      // We look for the word preceded by the start of the string or a non-dot character
+      // Note: This isn't perfect parsing but reduces false positives for common property names
+      const regex = new RegExp(`(^|[^.])\\b${word}\\b`);
+      if (regex.test(script)) {
+         throw new Error(`Security Error: Script contains forbidden keyword '${word}'`);
+      }
+    }
   }
 
   public getAllPatterns(): Promise<Pattern[]> {
