@@ -38,17 +38,8 @@ const getTargetMutagens = (heavenlyStem: HeavenlyStemKey) => {
  * @returns {number} 处理后的索引
  */
 export const fixIndex = (index: number, max: number = 12): number => {
-  if (index < 0) {
-    return fixIndex(index + max, max);
-  }
-
-  if (index > max - 1) {
-    return fixIndex(index - max, max);
-  }
-
-  const res = 1 / index === -Infinity ? 0 : index;
-
-  return res;
+  // ⚡ Bolt Optimization: Use O(1) modulo arithmetic instead of O(N) recursion
+  return ((index % max) + max) % max;
 };
 
 /**
