@@ -1,0 +1,4 @@
+## 2024-05-23 - Input Validation for Script Execution
+**Vulnerability:** The `PatternEngine` allowed storing arbitrary JavaScript code which is later executed via `vm.runInContext`. While `vm` provides some isolation, it is not a secure sandbox. Code injection of keywords like `process` or `require` could lead to RCE or sandbox escape.
+**Learning:** Naive blacklisting (checking `script.includes(word)`) causes false positives (e.g. blocking "important" because it contains "import"). Regex with word boundaries `/\bword\b/` is better but blocks property access `data.process`.
+**Prevention:** Use refined regex `/(^|[^.])\bword\b/` to block keywords only when they are not property accessors. Ensure validation runs asynchronously or before Promise creation to maintain consistent error handling. Always validate input at the edge before storage.
